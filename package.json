@@ -1,0 +1,15 @@
+{
+  "name": "nfcel",
+  "version": "0.14.0-cal",
+  "description": "Non-fungible celeries.",
+  "main": "index.js",
+  "repository": "https://github.com/spuuntries/nfcel.git",
+  "author": "spuun <kek@spuun.art>",
+  "license": "WTFPL",
+  "private": true,
+  "dependencies": {
+    "discord.js": "^13.6.0",
+    "dotenv": "^16.0.0",
+    "enmap": "^5.8.13"
+  }
+}
