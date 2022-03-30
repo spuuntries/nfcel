@@ -39,7 +39,8 @@ client.on("ready", () => {
 });
 
 client.on("messageCreate", async (message) => {
-  if (message.content.toLowerCase().startsWith(procenv.PREFIX)) cmdHandler(message);
+  if (message.content.toLowerCase().startsWith(procenv.PREFIX))
+    cmdHandler(message);
   if (
     message.author.bot ||
     (await message.member.fetch()).roles.cache.find((r) =>
@@ -59,7 +60,10 @@ client.on("messageCreate", async (message) => {
             name: "genesis",
             owner: procenv.OWNER,
             rarity: procenv.RARITYCAP,
-            mintReq: 1
+            validationCeleries: [],
+            mintReq: 1,
+            hash: undefined,
+            previousCelery: undefined,
           },
         ]),
     wallets = chaindb.get("wallets")
@@ -69,9 +73,10 @@ client.on("messageCreate", async (message) => {
             id: procenv.OWNER,
             ownedCeleries: [0],
           },
-	  {
-	    id: client.user.id,
-	    ownedCeleries: [],
+          {
+            id: client.user.id,
+            ownedCeleries: [],
+          },
         ]),
     celeries = message.content
       .split(/ +/g)
@@ -81,14 +86,22 @@ client.on("messageCreate", async (message) => {
 
   for (let i = 0; i < celeries.length; i++) {
     // Calculate for each celery their validity,
-    // the lower the celeries:message.content.length, the more likely
-    // it is to be valid
-    let ratio = celeries.length - i,
-      validity = Math.floor(Math.random() * ratio);
+    // the more balanced the celeries:message.content.length is,
+    // the more likely it is to be valid
+    let ratio = celeries.length / message.content.length;
+    function randControlled(r) {
+      if (r >= 1) r = r / Math.pow(10, Math.floor(r).length);
+      let rand = Math.random(),
+        validity = rand >= Math.abs(0.5 - r);
+      return validity;
+    }
+    let validation = randControlled(ratio);
 
-    if (validity === 0) {
-      // If the celery is valid, add it to the calculated array
-      calculated.push(celeries[i]);
+    if (validation[1]) {
+      calculated.push({
+        celery: celeries[i],
+        validity: validation[0],
+      });
     }
   }
 
@@ -105,7 +118,17 @@ client.on("messageCreate", async (message) => {
       rarity: procenv.RARITYCAP,
       validationCeleries: calculated,
       mintReq: Math.floor(Math.random() * procenv.MINTREQ) + 1,
+      hash: undefined,
+      previousCelery: crypto
+        .createHash("sha256")
+        .update(message.content)
+        .digest("hex"),
     };
+
+    minted.hash = crypto
+      .createHash("sha256")
+      .update(JSON.stringify(minted))
+      .digest("hex");
 
     // Add the minted celery to the chain
     chain.push(minted);
@@ -145,66 +168,100 @@ client.on("messageCreate", async (message) => {
 
     if (subcmd == "help") {
       let embed = new Discord.MessageEmbed()
-	.setColor("#0099ff")
-	.setTitle("Non-Fungible Celeries")
-	.setDescription("Rare and valuable celeries!")
-	.addField("Commands:", `${procenv.PREFIX}celery help\n${procenv.PREFIX}celery info <celery id>\n${procenv.PREFIX}celery list <user id>\n${procenv.PREFIX}celery exchange <celery id>`)
-
-	.setFooter(`Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`)
+        .setColor("#0099ff")
+        .setTitle("Non-Fungible Celeries")
+        .setDescription("Rare and valuable celeries!")
+        .addField(
+          "Commands:",
+          `${procenv.PREFIX}celery help\n${procenv.PREFIX}celery info <celery id>\n${procenv.PREFIX}celery list <user id>\n${procenv.PREFIX}celery exchange <celery id>`
+        )
+        .setFooter({
+          text: `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`,
+        });
       message.channel.send(embed);
     } else if (subcmd == "info") {
       let celery = chain.find((c) => c.id == args[0]);
-      if (!celery) message.reply({content: "Celery with that id does not exist!", allowedMentions: {mentionedUser: false})
+      if (!celery)
+        message.reply({
+          content: "Celery with that id does not exist!",
+          allowedMentions: { mentionedUser: false },
+        });
 
       let rarityString, rarityColor;
 
       switch (celery.rarity) {
-	case 1:
-	  rarityString = "Common";
-	  rarityColor = "#0099ff";
-	  break;
-	case 2:
-	  rarityString = "Uncommon";
-	  rarityColor = "#00ff00";
-	  break;
-	case 3:
-	  rarityString = "Rare";
-	  rarityColor = "#ff9900";
-	  break;
-	case 4:
-	  rarityString = "Epic";
-	  rarityColor = "#ff0000";
-	  break;
-	default:
-	  rarityString = "Legendary";
-	  rarityColor = "#ffff00";
-	  break;
+        case 1:
+          rarityString = "Common";
+          rarityColor = "#0099ff";
+          break;
+        case 2:
+          rarityString = "Uncommon";
+          rarityColor = "#00ff00";
+          break;
+        case 3:
+          rarityString = "Rare";
+          rarityColor = "#ff9900";
+          break;
+        case 4:
+          rarityString = "Epic";
+          rarityColor = "#ff0000";
+          break;
+        default:
+          rarityString = "Legendary";
+          rarityColor = "#ffff00";
+          break;
       }
 
       let embed = new Discord.MessageEmbed()
-	.setColor(rarityColor)
-	.setTitle(`${celery.owner}'s Celery of ${celery.name}`)
-	.setDescription(`ID: #${celery.id}\nRarity: ${rarityString}\nValidation celeries: ${celery.validationCeleries.join(", ")}\nMinting requirement: ${celery.mintReq}`)
-	.setFooter(`Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`)
+        .setColor(rarityColor)
+        .setTitle(`${celery.owner}'s Celery of ${celery.name}`)
+        .setDescription(
+          `ID: #${
+            celery.id
+          }\nRarity: ${rarityString}\nValidation celeries: ${celery.validationCeleries
+            .map((c) => JSON.stringify(c))
+            .join(", ")}\nMinting requirement: ${celery.mintReq}`
+        )
+        .setFooter(
+          `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`
+        );
       message.channel.send(embed);
     } else if (subcmd == "list") {
       let user = wallets.find((w) => w.id == args[0]);
-      if (!user) message.reply({content: "User with that id does not exist!", allowedMentions: {mentionedUser: false}})
+      if (!user)
+        message.reply({
+          content: "User with that id does not exist!",
+          allowedMentions: { mentionedUser: false },
+        });
 
       let embed = new Discord.MessageEmbed()
-	.setColor("#0099ff")
-	.setTitle(`${user.id}'s Celery List`)
-	.setDescription(`${user.ownedCeleries.map((c) => `#${c}`).join("\n")}`)
-	.setFooter(`Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`)
+        .setColor("#0099ff")
+        .setTitle(`${user.id}'s Celery List`)
+        .setDescription(`${user.ownedCeleries.map((c) => `#${c}`).join("\n")}`)
+        .setFooter(
+          `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`
+        );
       message.channel.send(embed);
     } else if (subcmd == "exchange") {
       let celery = chain.find((c) => c.id == args[0]);
-      if (!celery) message.reply({content: "Celery with that id does not exist!", allowedMentions: {mentionedUser: false}})
+      if (!celery)
+        message.reply({
+          content: "Celery with that id does not exist!",
+          allowedMentions: { mentionedUser: false },
+        });
 
       let user = wallets.find((w) => w.id == message.author.id);
-      if (!user) message.reply({content: "You do not have a wallet!", allowedMentions: {mentionedUser: false}})
+      if (!user)
+        message.reply({
+          content: "You do not have a wallet!",
+          allowedMentions: { mentionedUser: false },
+        });
 
-      if (!user.ownedCeleries.includes(celery.id)) message.reply({content: "You do not own this celery!", allowedMentions: {mentionedUser: false}})
-
-      
+      if (!user.ownedCeleries.includes(celery.id))
+        message.reply({
+          content: "You do not own this celery!",
+          allowedMentions: { mentionedUser: false },
+        });
+    }
+  }
 });
