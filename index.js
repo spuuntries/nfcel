@@ -117,17 +117,22 @@ client.on("messageCreate", async (message) => {
       owner: procenv.OWNER,
       rarity: procenv.RARITYCAP,
       validationCeleries: calculated,
-      mintReq: Math.floor(Math.random() * procenv.MINTREQ) + 1,
+      mintReq: Math.floor(Math.random() * procenv.RARITYCAP) + 1,
       hash: undefined,
       previousCelery: crypto
         .createHash("sha256")
-        .update(message.content)
+        .update(JSON.stringify(chain[chain.length - 1]))
         .digest("hex"),
     };
 
     minted.hash = crypto
       .createHash("sha256")
-      .update(JSON.stringify(minted))
+      .update(
+        crypto
+          .createHash("sha256")
+          .update(JSON.stringify(minted))
+          .digest("hex") + minted.previousCelery
+      )
       .digest("hex");
 
     // Add the minted celery to the chain
@@ -155,7 +160,7 @@ client.on("messageCreate", async (message) => {
     message.react("🥬");
 
     // Log the minted celery
-    logger(`Minted ${minted.name} to ${message.author.tag}`);
+    logger(`Minted ${minted.hash} to ${message.author.tag}`);
   }
 
   // Command handler
