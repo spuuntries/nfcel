@@ -15,6 +15,9 @@ const Discord = require("discord.js"),
   }),
   procenv = process.env,
   crypto = require("crypto"),
+  { Client } = require("unb-api"),
+  unbClient = new Client(procenv.UNBTOKEN),
+  phonetic = require("phonetic"),
   // In prod remove the ".default" and vice versa
   Enmap = require("enmap"),
   chaindb = new Enmap({
@@ -56,14 +59,17 @@ client.on("messageCreate", async (message) => {
       ? chaindb.get("chain")
       : chaindb.set("chain", [
           {
-            id: 0,
-            name: "genesis",
-            owner: procenv.OWNER,
-            rarity: procenv.RARITYCAP,
-            validationCeleries: [],
-            mintReq: 1,
-            hash: undefined,
-            previousCelery: undefined,
+            block: {
+              id: 0,
+              name: "genesis",
+              owner: procenv.OWNER,
+              rarity: procenv.RARITYCAP,
+              validationCeleries: [],
+              mintReq: 1,
+              hash: undefined,
+              previousCelery: undefined,
+            },
+            displayName: "genesis",
           },
         ]),
     wallets = chaindb.get("wallets")
@@ -113,15 +119,15 @@ client.on("messageCreate", async (message) => {
     // If so, mint a non-fungible celery
     let minted = {
       id: chain.length,
-      name: `${calculated.join(" ")}`,
-      owner: procenv.OWNER,
-      rarity: procenv.RARITYCAP,
+      name: phonetic.generate({ syllables: 2, phoneticSimplicity: 6 }),
+      minter: message.author.id,
+      rarity: calculated.length,
       validationCeleries: calculated,
       mintReq: Math.floor(Math.random() * procenv.RARITYCAP) + 1,
       hash: undefined,
       previousCelery: crypto
         .createHash("sha256")
-        .update(JSON.stringify(chain[chain.length - 1]))
+        .update(JSON.stringify(chain[chain.length - 1].block))
         .digest("hex"),
     };
 
@@ -136,7 +142,7 @@ client.on("messageCreate", async (message) => {
       .digest("hex");
 
     // Add the minted celery to the chain
-    chain.push(minted);
+    chain.push({ block: minted, displayName: minted.name });
 
     // Check if user has a wallet
     // If not, create one
@@ -178,14 +184,23 @@ client.on("messageCreate", async (message) => {
         .setDescription("Rare and valuable celeries!")
         .addField(
           "Commands:",
-          `${procenv.PREFIX}celery help\n${procenv.PREFIX}celery info <celery id>\n${procenv.PREFIX}celery list <user id>\n${procenv.PREFIX}celery exchange <celery id>`
+          `${procenv.PREFIX}celery help - Shows this message
+${procenv.PREFIX}celery info <celery id> - Shows information about a celery
+${procenv.PREFIX}celery list <user id> - Shows a list of celeries owned by a user
+${procenv.PREFIX}celery give <user id> <celery id> - Give a celery to a user
+${procenv.PREFIX}celery exchange <celery id> <user id> - Exchanges a celery for cookies, based on rarity`
         )
         .setFooter({
-          text: `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`,
+          text: `Current celery minting requirement: ${
+            chain[chain.length - 1].block.mintReq
+          }
+Current number of celeries in circulation: ${chain.length}
+Get a rare or higher celery for a special gift on exchange!`,
         });
       message.channel.send(embed);
     } else if (subcmd == "info") {
-      let celery = chain.find((c) => c.id == args[0]);
+      let celery = chain.find((c) => c.block.id == args[0]),
+        celeryOwner = wallets.find((w) => w.ownedCeleries.includes(args[0]));
       if (!celery)
         message.reply({
           content: "Celery with that id does not exist!",
@@ -194,7 +209,7 @@ client.on("messageCreate", async (message) => {
 
       let rarityString, rarityColor;
 
-      switch (celery.rarity) {
+      switch (celery.block.rarity) {
         case 1:
           rarityString = "Common";
           rarityColor = "#0099ff";
@@ -219,17 +234,21 @@ client.on("messageCreate", async (message) => {
 
       let embed = new Discord.MessageEmbed()
         .setColor(rarityColor)
-        .setTitle(`${celery.owner}'s Celery of ${celery.name}`)
+        .setTitle(`<@${celeryOwner.id}>'s Celery of ${celery.displayName}`)
         .setDescription(
-          `ID: #${
-            celery.id
-          }\nRarity: ${rarityString}\nValidation celeries: ${celery.validationCeleries
-            .map((c) => JSON.stringify(c))
-            .join(", ")}\nMinting requirement: ${celery.mintReq}`
+          `**ID:** #${celery.block.id}\n**Minted by:** <@${celery.block.minter}>
+**Rarity:** ${rarityString}
+**Validation celeries:** ${celery.block.validationCeleries.length}
+**Next minting requirement:** ${celery.block.mintReq}
+**Hash:** ${celery.block.hash}`
         )
-        .setFooter(
-          `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`
-        );
+        .setFooter({
+          text: `Current celery minting requirement: ${
+            chain[chain.length - 1].block.mintReq
+          }\nCurrent number of celeries in circulation: ${
+            chain.length
+          }\nLatest celery: ${chain[chain.length - 1].block.id}`,
+        });
       message.channel.send(embed);
     } else if (subcmd == "list") {
       let user = wallets.find((w) => w.id == args[0]);
@@ -242,13 +261,23 @@ client.on("messageCreate", async (message) => {
       let embed = new Discord.MessageEmbed()
         .setColor("#0099ff")
         .setTitle(`${user.id}'s Celery List`)
-        .setDescription(`${user.ownedCeleries.map((c) => `#${c}`).join("\n")}`)
-        .setFooter(
-          `Current celery minting requirement: ${procenv.MINTREQ}\nCurrent celery in circulation: ${chain.length}`
-        );
+        .setDescription(
+          `${user.ownedCeleries
+            .map(
+              (c) => `#${c} (${chain.find((c) => c.block.id == c).displayName})`
+            )
+            .join("\n")}`
+        )
+        .setFooter({
+          text: `Current celery minting requirement: ${
+            chain[chain.length - 1].block.mintReq
+          }\nCurrent number of celeries in circulation: ${
+            chain.length
+          }\nLatest celery: ${chain[chain.length - 1].block.id}`,
+        });
       message.channel.send(embed);
     } else if (subcmd == "exchange") {
-      let celery = chain.find((c) => c.id == args[0]);
+      let celery = chain.find((c) => c.block.id == args[0]);
       if (!celery)
         message.reply({
           content: "Celery with that id does not exist!",
@@ -267,6 +296,59 @@ client.on("messageCreate", async (message) => {
           content: "You do not own this celery!",
           allowedMentions: { mentionedUser: false },
         });
+
+      let botWallet = wallets.find((w) => w.id == client.user.id);
+      if (!botWallet)
+        message.reply({
+          content: "An internal error occurred!\nPlease try again later.",
+          allowedMentions: { mentionedUser: false },
+        });
+
+      if (botWallet.ownedCeleries.includes(celery.block.id))
+        message.reply({
+          text: "This celery has already been exchanged!",
+          allowedMentions: { mentionedUser: false },
+        });
+
+      let ccAmt;
+
+      switch (celery.block.rarity) {
+        case 1:
+          ccAmt = 10;
+          break;
+        case 2:
+          ccAmt = 20;
+          break;
+        case 3:
+          ccAmt = 30;
+          break;
+        case 4:
+          ccAmt = 40;
+          break;
+        default:
+          ccAmt = 50 + 10 * celery.block.rarity;
+          break;
+      }
+
+      let embed = new Discord.MessageEmbed()
+        .setColor("#0099ff")
+        .setTitle(`${message.author.tag}'s Celery Exchange`)
+        .setDescription(
+          `#${celery.block.id} (${celery.displayName}) exchanged for ${ccAmt} Cookies!`
+        )
+        .setFooter({
+          text: `Current celery minting requirement: ${
+            chain[chain.length - 1].block.mintReq
+          }\nCurrent number of celeries in circulation: ${
+            chain.length
+          }\nLatest celery: ${chain[chain.length - 1].block.id}${
+            celery.block.rarity >= 3
+              ? '\nPsst! You can also exchange your rare celery for a real "Interested Celery Canoe Organization" NFT on ClosedSea!\n' +
+                "[Click here to exchange](https://youtube.com/watch?v=dQw4w9WgXcQ) to get a legendary celery!"
+              : ""
+          }`,
+        });
+      message.channel.send(embed);
     }
   }
 });
